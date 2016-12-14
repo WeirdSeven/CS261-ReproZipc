@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 [![Build Status](https://travis-ci.org/ViDA-NYU/reprozip.svg?branch=master)]
 (https://travis-ci.org/ViDA-NYU/reprozip)
 [![Coverage Status]
@@ -188,3 +189,6 @@ ReproZip is currently being developed at [NYU][nyu]. The team includes:
 [ds]: http://cs.nyu.edu/shasha/
 [vs]: https://vickysteeves.com/
 [nyu]: http://engineering.nyu.edu/
+=======
+# CS261-ReproZipc
+>>>>>>> 7e16c32d564db1c2ec99cc460e2a9ddccc405390
