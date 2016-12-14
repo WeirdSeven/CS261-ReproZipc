@@ -13,7 +13,10 @@
 #include <sys/uio.h>
 #include <sys/user.h>
 #include <sys/wait.h>
+#include <sys/ioctl.h>
 #include <unistd.h>
+#include <poll.h>
+#include <pthread.h>
 
 #include "config.h"
 #include "database.h"
@@ -22,6 +25,7 @@
 #include "syscalls.h"
 #include "tracer.h"
 #include "utils.h"
+#include "vector.h"
 
 
 #ifndef NT_PRSTATUS
@@ -328,10 +332,48 @@ static void trace_set_options(pid_t tid)
            PTRACE_O_TRACEEXEC);
 }
 
+
+vector *tid_worker_pipe_list;
+
+static void add_tid_worker_pipe(pid_t tid, int worker_pipe[4]) {
+    tid_worker_pipe cur_tid_worker_pipe;
+    cur_tid_worker_pipe.tid = tid;
+    for (int i = 0; i < 4; i++)
+        cur_tid_worker_pipe.worker_pipe[i] = worker_pipe[i];
+    vector_add(tid_worker_pipe_list, cur_tid_worker_pipe);
+}
+
+static int get_worker_pipe_write(pid_t tid) {
+    int index = vector_find_tid(tid_worker_pipe_list, tid);
+    //printf("After vector_find_tid. Index is [%d]\n", index);
+    if (index == -1) {
+        return -1;
+    } else {
+        return vector_get(tid_worker_pipe_list, index).worker_pipe[3];
+    }
+}
+
+static int delete_tid_worker_pip(pid_t tid) {
+    int index = vector_find_tid(tid_worker_pipe_list, tid);
+    if (index == -1) {
+        return -1;
+    } else {
+        vector_delete(tid_worker_pipe_list, index);
+        return 1;
+    }
+}
+
 static int trace(pid_t first_proc, int *first_exit_code)
 {
+    //printf("Beginning of trace\n");
+    int num_workers = 0;
+
+    vpollfd pollfds;
+    vpollfd_init(&pollfds);
+
     for(;;)
     {
+        //printf("I am tracer. New iteration begins.\n");
         int status;
         pid_t tid;
         int cpu_time;
@@ -339,12 +381,12 @@ static int trace(pid_t first_proc, int *first_exit_code)
 
         /* Wait for a process */
 #if NO_WAIT3
-        tid = waitpid(-1, &status, __WALL);
+        tid = waitpid(-1, &status, __WALL | WNOHANG);
         cpu_time = -1;
 #else
         {
             struct rusage res;
-            tid = wait3(&status, __WALL, &res);
+            tid = wait3(&status, __WALL | WNOHANG, &res);
             cpu_time = (res.ru_utime.tv_sec * 1000 +
                         res.ru_utime.tv_usec / 1000);
         }
@@ -357,8 +399,35 @@ static int trace(pid_t first_proc, int *first_exit_code)
             return -1;
             /* LCOV_EXCL_END */
         }
+
+        if (tid == 0)
+            goto read;
+
+        //printf("I am tracer. I found my child. His PID is [%d]\n", tid);
+
+        /*int index;
+        if ((index = vector_find(&workers, tid) != -1) {
+            vector_delete(&workers, index);
+            continue;
+        }*/
+
         if(WIFEXITED(status) || WIFSIGNALED(status))
         {
+            //printf("I am tracer. I am finalizing my child [%d]\n", tid);
+            int index = vector_find_tid(tid_worker_pipe_list, tid);
+            if (index == -1) {
+            //    printf("Invalid TID2\n");
+                exit(EXIT_FAILURE);
+            }
+            vpollfd_delete(&pollfds, index);
+            num_workers -= 1;
+
+
+            if (delete_tid_worker_pip(tid) == -1) {
+            //    printf("TID [%d] is invalid.\n", tid);
+                exit(EXIT_FAILURE);
+            }
+
             unsigned int nprocs, unknown;
             int exitcode;
             if(WIFSIGNALED(status))
@@ -525,8 +594,54 @@ static int trace(pid_t first_proc, int *first_exit_code)
                 process->mode = MODE_X86_64;
             }
 #endif
-            if(syscall_handle(process) != 0)
-                return -1;
+            //printf("I am tracer. I am before worker pipe write.\n");
+            int worker_pipe_write = get_worker_pipe_write(tid);
+            //printf("Wroker pipe write = [%d]\n", worker_pipe_write);
+            if (worker_pipe_write == -1) {
+                //printf("I am tracer. I am creating a worker for my child [%d]\n", tid);
+                pthread_t worker;
+                int worker_pipe[4];
+                if (pipe(&worker_pipe[0]) == -1) {
+                    perror("pipe1");
+                    exit(EXIT_FAILURE);
+                }
+                if (pipe(&worker_pipe[2]) == -1) {
+                    perror("pipe2");
+                    exit(EXIT_FAILURE);
+                }
+                worker_arg *argument = (worker_arg *)malloc(sizeof(worker_arg));
+                for (int i = 0; i < 4; i++) {
+                    argument->fd[i] = worker_pipe[i];
+                    //printf("worker_pipe[%d] = %d\n", i, worker_pipe[i]);
+                }
+                worker_pipe_write = worker_pipe[3];
+
+                add_tid_worker_pipe(tid, worker_pipe);
+
+                num_workers += 1;
+
+                struct pollfd cur_pollfd;
+                cur_pollfd.fd = worker_pipe[0];
+                cur_pollfd.events = POLLIN | POLLPRI;
+                vpollfd_add(&pollfds, cur_pollfd);
+
+                pthread_create(&worker, NULL, syscall_handle, argument);
+
+                //printf("I am tracer. I finished creating a worker for my child [%d]\n", tid);
+                //pthread_detach(worker);
+            }
+
+            //printf("I am parent. I am writing to fd [%d]\n", worker_pipe_write);
+            //ssize_t len1 = write(worker_pipe_write, process, sizeof(struct Process));
+            ssize_t len1 = write(worker_pipe_write, &process, sizeof(struct Process *));
+            if (len1 == -1) {
+            //    printf("Parent write failed.\n");
+                exit(EXIT_FAILURE);
+            } else {
+            //    printf("I am parent. I have written [%d] bytes. The size of Process is [%d] bytes.\n", (int)len1, (int)sizeof(struct Process));
+            }
+            //if(syscall_handle(process) != 0)
+            //    return -1;
         }
         /* Handle signals */
         else if(WIFSTOPPED(status))
@@ -542,6 +657,7 @@ static int trace(pid_t first_proc, int *first_exit_code)
                     log_debug(tid,
                              "got EVENT_EXEC, an execve() was successful and "
                              "will return soon");
+                    //printf("Process has value [%p]\n", process);
                     if(syscall_execve_event(process) != 0)
                         return -1;
                 }
@@ -582,6 +698,69 @@ static int trace(pid_t first_proc, int *first_exit_code)
                 }
             }
         }
+
+
+read: ;
+        //printf("I am tracer. I am polling.\n");
+        struct pollfd *pollfds_items = vpollfd_items(&pollfds);
+        int num_ready = poll(pollfds_items, num_workers, 50);
+        //printf("I am tracer. I finished polling. Polling resul: [%d]\n", num_ready);
+        if (num_ready == 0)
+            continue;
+        if (num_ready == -1) {
+            perror("Poll");
+            exit(1);
+        }
+
+        for (int i = 0; i < num_workers; i++) {
+            if (pollfds_items[i].revents & POLLIN || pollfds_items[i].revents & POLLPRI) {
+                int num_bytes_ready;
+                if (ioctl(pollfds_items[i].fd, FIONREAD, &num_bytes_ready) < 0) {
+                    perror("ioctl");
+                    exit(1);
+                }
+                //printf("[%d] bytes are available.\n", num_bytes_ready);
+
+                int request;
+                pid_t tid;
+                void *addr;
+                void *data;
+
+                ssize_t len1 = read(pollfds_items[i].fd, &request, sizeof(request));
+                //printf("Request: [%d]\n", request);
+                ssize_t len2 = read(pollfds_items[i].fd, &tid, sizeof(tid));
+                //printf("TID: [%d]\n", tid);
+                ssize_t len3 = read(pollfds_items[i].fd, &addr, sizeof(addr));
+                //printf("ADDR: [%p]\n", addr);
+                ssize_t len4 = read(pollfds_items[i].fd, &data, sizeof(data));
+                //printf("DATA: [%p]\n", data);
+                //printf("Read length: [%d], [%d], [%d], [%d]\n", (int)len1, (int)len2, (int)len3, (int)len4);
+
+
+                //if (request == PTRACE_SYSCALL) {
+                    //printf("Before letting child go.\n");
+                //}
+
+                errno = 0;
+                long res = ptrace(request, tid, addr, data);
+
+                //if (request == PTRACE_SYSCALL) {
+                    //printf("After letting child go.\n");
+                //}
+
+                //printf("Ptrace result [%ld]\n", res);
+                if (res == -1) {
+                    perror("ptrace");
+                }
+
+
+                int writefd = get_worker_pipe_write(tid);
+                ssize_t len5 = write(writefd, &res, sizeof(res));
+                (void)len5;
+            }
+        }
+        
+
     }
 
     return 0;
@@ -668,6 +847,8 @@ static void trace_init(void)
     }
 
     syscall_build_table();
+    tid_worker_pipe_list = (vector *)malloc(sizeof(vector));
+    vector_init(tid_worker_pipe_list);
 }
 
 int fork_and_trace(const char *binary, int argc, char **argv,
@@ -675,7 +856,9 @@ int fork_and_trace(const char *binary, int argc, char **argv,
 {
     pid_t child;
 
+    //printf("Before trace init\n");
     trace_init();
+    //printf("After trace init\n");
 
     child = fork();
 
@@ -684,6 +867,7 @@ int fork_and_trace(const char *binary, int argc, char **argv,
 
     if(child == 0)
     {
+        //printf("Hey! I am tracee. My pid is [%d]\n", getpid());
         char **args = malloc((argc + 1) * sizeof(char*));
         memcpy(args, argv, argc * sizeof(char*));
         args[argc] = NULL;
@@ -699,8 +883,10 @@ int fork_and_trace(const char *binary, int argc, char **argv,
             exit(1);
         }
         /* Stop this once so tracer can set options */
+        //printf("Hey! I am tracee. I am right before kill.\n");
         kill(getpid(), SIGSTOP);
         /* Execute the target */
+        //printf("Hey! I am tracee. I am right before exec.\n");
         execvp(binary, args);
         log_critical(0, "couldn't execute the target command (execvp "
                      "returned): %s", strerror(errno));

@@ -12,7 +12,6 @@
 
 #define count(x) (sizeof((x))/sizeof(*(x)))
 #define check(r) do { if((r) != SQLITE_OK) { goto sqlerror; } } while(0)
-//#define check(r) 
 
 static sqlite3_uint64 gettime(void)
 {
@@ -33,18 +32,17 @@ static sqlite3_uint64 gettime(void)
 }
 
 static sqlite3 *db;
-//static sqlite3_stmt *stmt_last_rowid;
-//static sqlite3_stmt *stmt_insert_process;
-//static sqlite3_stmt *stmt_set_exitcode;
-//static sqlite3_stmt *stmt_insert_file;
-//static sqlite3_stmt *stmt_insert_exec;
-//static sqlite3_stmt *stmt_insert_connection;
+static sqlite3_stmt *stmt_last_rowid;
+static sqlite3_stmt *stmt_insert_process;
+static sqlite3_stmt *stmt_set_exitcode;
+static sqlite3_stmt *stmt_insert_file;
+static sqlite3_stmt *stmt_insert_exec;
+static sqlite3_stmt *stmt_insert_connection;
 
 static int run_id = -1;
 
 int db_init(const char *filename)
 {
-	//printf("I am initing!\n");
     int tables_exist;
 
     check(sqlite3_open(filename, &db));
@@ -138,15 +136,8 @@ int db_init(const char *filename)
             "CREATE INDEX connections_proc_idx ON connections(process);",
         };
         size_t i;
-
-        //time_t exec_start_time = clock();
-
         for(i = 0; i < count(sql); ++i)
             check(sqlite3_exec(db, sql[i], NULL, NULL, NULL));
-
-        //time_t exec_end_time = clock();
-        //printf("\t\t-> the exec time in database is : %f\n", (double)(exec_end_time - exec_start_time)/CLOCKS_PER_SEC);
-
     }
 
     /* Get the first unused run_id */
@@ -170,67 +161,48 @@ int db_init(const char *filename)
     log_debug(0, "This is run %d", run_id);
 
     {
-        //const char *sql = ""
-        //        "SELECT last_insert_rowid()";
-        //check(sqlite3_prepare_v2(db, sql, -1, &stmt_last_rowid, NULL));
+        const char *sql = ""
+                "SELECT last_insert_rowid()";
+        check(sqlite3_prepare_v2(db, sql, -1, &stmt_last_rowid, NULL));
     }
 
     {
-        //const char *sql = ""
-        //        "INSERT INTO processes(run_id, parent, timestamp, is_thread) "
-        //        "VALUES(?, ?, ?, ?)";
-
-        //time_t prepare_start_time = clock();
-
-        //check(sqlite3_prepare_v2(db, sql, -1, &stmt_insert_process, NULL));
-
-        //time_t prepare_end_time = clock();
-        //printf("\t\t-> the prepare time(insert process) in database is : %f\n", (double)(prepare_end_time - prepare_start_time)/CLOCKS_PER_SEC);
-
+        const char *sql = ""
+                "INSERT INTO processes(run_id, parent, timestamp, is_thread) "
+                "VALUES(?, ?, ?, ?)";
+        check(sqlite3_prepare_v2(db, sql, -1, &stmt_insert_process, NULL));
     }
 
     {
-    //    const char *sql = ""
-    //            "UPDATE processes SET exitcode=?, exit_timestamp=?, "
-    //            "        cpu_time=? "
-    //            "WHERE id=?";
-    //    check(sqlite3_prepare_v2(db, sql, -1, &stmt_set_exitcode, NULL));
+        const char *sql = ""
+                "UPDATE processes SET exitcode=?, exit_timestamp=?, "
+                "        cpu_time=? "
+                "WHERE id=?";
+        check(sqlite3_prepare_v2(db, sql, -1, &stmt_set_exitcode, NULL));
     }
 
     {
-    //    const char *sql = ""
-    //            "INSERT INTO opened_files(run_id, name, timestamp, "
-    //            "        mode, is_directory, process) "
-    //            "VALUES(?, ?, ?, ?, ?, ?)";
-
-        //time_t prepare_start_time = clock();
-
-    //    check(sqlite3_prepare_v2(db, sql, -1, &stmt_insert_file, NULL));
-    
-        //time_t prepare_end_time = clock();
-        //printf("\t\t-> the prepare time(insert open_files) in database is : %f\n", (double)(prepare_end_time - prepare_start_time)/CLOCKS_PER_SEC);
-	}
+        const char *sql = ""
+                "INSERT INTO opened_files(run_id, name, timestamp, "
+                "        mode, is_directory, process) "
+                "VALUES(?, ?, ?, ?, ?, ?)";
+        check(sqlite3_prepare_v2(db, sql, -1, &stmt_insert_file, NULL));
+    }
 
     {
-        //const char *sql = ""
-        //        "INSERT INTO executed_files(run_id, name, timestamp, process, "
-        //        "        argv, envp, workingdir) "
-        //        "VALUES(?, ?, ?, ?, ?, ?, ?)";
-
-        //time_t prepare_start_time = clock();
-
-        //check(sqlite3_prepare_v2(db, sql, -1, &stmt_insert_exec, NULL));
-    
-        //time_t prepare_end_time = clock();
-        //printf("\t\t-> the prepare time(insert exec_files) in database is : %f\n", (double)(prepare_end_time - prepare_start_time)/CLOCKS_PER_SEC);
-}
+        const char *sql = ""
+                "INSERT INTO executed_files(run_id, name, timestamp, process, "
+                "        argv, envp, workingdir) "
+                "VALUES(?, ?, ?, ?, ?, ?, ?)";
+        check(sqlite3_prepare_v2(db, sql, -1, &stmt_insert_exec, NULL));
+    }
 
     {
-    //    const char *sql = ""
-    //            "INSERT INTO connections(run_id, timestamp, process, "
-    //            "        inbound, family, protocol, address) "
-    //            "VALUES(?, ?, ?, ?, ?, ?, ?)";
-    //    check(sqlite3_prepare_v2(db, sql, -1, &stmt_insert_connection, NULL));
+        const char *sql = ""
+                "INSERT INTO connections(run_id, timestamp, process, "
+                "        inbound, family, protocol, address) "
+                "VALUES(?, ?, ?, ?, ?, ?, ?)";
+        check(sqlite3_prepare_v2(db, sql, -1, &stmt_insert_connection, NULL));
     }
 
     return 0;
@@ -242,7 +214,6 @@ sqlerror:
 
 int db_close(int rollback)
 {
-	//printf("I am closing!\n");
     if(rollback)
     {
         check(sqlite3_exec(db, "ROLLBACK;", NULL, NULL, NULL));
@@ -252,12 +223,12 @@ int db_close(int rollback)
         check(sqlite3_exec(db, "COMMIT;", NULL, NULL, NULL));
     }
     log_debug(0, "database file closed%s", rollback?" (rolled back)":"");
-    //check(sqlite3_finalize(stmt_last_rowid));
-    //check(sqlite3_finalize(stmt_insert_process));
-    //check(sqlite3_finalize(stmt_set_exitcode));
-    //check(sqlite3_finalize(stmt_insert_file));
-    //check(sqlite3_finalize(stmt_insert_exec));
-    //check(sqlite3_finalize(stmt_insert_connection));
+    check(sqlite3_finalize(stmt_last_rowid));
+    check(sqlite3_finalize(stmt_insert_process));
+    check(sqlite3_finalize(stmt_set_exitcode));
+    check(sqlite3_finalize(stmt_insert_file));
+    check(sqlite3_finalize(stmt_insert_exec));
+    check(sqlite3_finalize(stmt_insert_connection));
     check(sqlite3_close(db));
     run_id = -1;
     return 0;
@@ -272,21 +243,6 @@ sqlerror:
 int db_add_process(unsigned int *id, unsigned int parent_id,
                    const char *working_dir, int is_thread)
 {
-	//printf("I am adding process!\n");
-    char sql_insert_process[1024];
-    sql_insert_process[0] = '\0';
-    if(parent_id == DB_NO_PARENT)
-    {
-        sprintf(sql_insert_process, "INSERT INTO processes(run_id, parent, timestamp, is_thread) VALUES(%d, null, %lld, %d)", run_id, gettime(), is_thread?1:0);
-    }
-    else
-    {
-        sprintf(sql_insert_process, "INSERT INTO processes(run_id, parent, timestamp, is_thread) VALUES(%d, %d, %lld, %d)", run_id, parent_id, gettime(), is_thread?1:0);
-    }
-
-
-
-/*
     check(sqlite3_bind_int(stmt_insert_process, 1, run_id));
     if(parent_id == DB_NO_PARENT)
     {
@@ -296,39 +252,25 @@ int db_add_process(unsigned int *id, unsigned int parent_id,
     {
         check(sqlite3_bind_int(stmt_insert_process, 2, parent_id));
     }
-    // This assumes that we won't go over 2^32 seconds (~135 years) 
+    /* This assumes that we won't go over 2^32 seconds (~135 years) */
     check(sqlite3_bind_int64(stmt_insert_process, 3, gettime()));
     check(sqlite3_bind_int(stmt_insert_process, 4, is_thread?1:0));
-*/
-    //time_t step_start_time = clock();
 
-    check(sqlite3_exec(db, sql_insert_process, NULL, NULL, NULL));
-    //if(sqlite3_step(stmt_insert_process) != SQLITE_DONE)
-    //    goto sqlerror;
-
-    ////time_t step_end_time = clock();
-    ////printf("\t\t-> the step time(insert process) in database is : %f\n", (double)(step_end_time - step_start_time)/CLOCKS_PER_SEC);
-
-    //sqlite3_reset(stmt_insert_process);
+    if(sqlite3_step(stmt_insert_process) != SQLITE_DONE)
+        goto sqlerror;
+    sqlite3_reset(stmt_insert_process);
 
     /* Get id */
-    sqlite3_stmt *stmt_last_rowid;
-	{
-        const char *sql = ""
-                "SELECT last_insert_rowid()";
-        check(sqlite3_prepare_v2(db, sql, -1, &stmt_last_rowid, NULL));
-    }
     if(sqlite3_step(stmt_last_rowid) != SQLITE_ROW)
         goto sqlerror;
     *id = sqlite3_column_int(stmt_last_rowid, 0);
     if(sqlite3_step(stmt_last_rowid) != SQLITE_DONE)
         goto sqlerror;
-    sqlite3_finalize(stmt_last_rowid);
+    sqlite3_reset(stmt_last_rowid);
 
     return db_add_file_open(*id, working_dir, FILE_WDIR, 1);
 
 sqlerror:
-    printf("sqlite3 error inserting process: %s\n", sqlite3_errmsg(db));
     /* LCOV_EXCL_START : Insertions shouldn't fail */
     log_critical(0, "sqlite3 error inserting process: %s", sqlite3_errmsg(db));
     return -1;
@@ -342,18 +284,14 @@ int db_add_first_process(unsigned int *id, const char *working_dir)
 
 int db_add_exit(unsigned int id, int exitcode, int cpu_time)
 {
-	char sql_set_exitcode[1024];
-	sql_set_exitcode[0] = '\0';
-	sprintf(sql_set_exitcode, "UPDATE processes SET exitcode=%d, exit_timestamp=%lld, cpu_time=%d WHERE id=%d", exitcode, gettime(), cpu_time, id);
-	check(sqlite3_exec(db, sql_set_exitcode, NULL, NULL, NULL));
-    //check(sqlite3_bind_int(stmt_set_exitcode, 1, exitcode));
-    //check(sqlite3_bind_int64(stmt_set_exitcode, 2, gettime()));
-    //check(sqlite3_bind_int(stmt_set_exitcode, 3, cpu_time));
-    //check(sqlite3_bind_int(stmt_set_exitcode, 4, id));
+    check(sqlite3_bind_int(stmt_set_exitcode, 1, exitcode));
+    check(sqlite3_bind_int64(stmt_set_exitcode, 2, gettime()));
+    check(sqlite3_bind_int(stmt_set_exitcode, 3, cpu_time));
+    check(sqlite3_bind_int(stmt_set_exitcode, 4, id));
 
-    //if(sqlite3_step(stmt_set_exitcode) != SQLITE_DONE)
-    //    goto sqlerror;
-    //sqlite3_reset(stmt_set_exitcode);
+    if(sqlite3_step(stmt_set_exitcode) != SQLITE_DONE)
+        goto sqlerror;
+    sqlite3_reset(stmt_set_exitcode);
 
     return 0;
 
@@ -367,29 +305,17 @@ sqlerror:
 int db_add_file_open(unsigned int process, const char *name,
                      unsigned int mode, int is_dir)
 {
-	//printf("I am adding open_files!\n");
-	char sql_insert_file[1024];
-	sql_insert_file[0] = '\0';
-    //printf("name = [%s]\n", name);
-	sprintf(sql_insert_file, "INSERT INTO opened_files(run_id, name, timestamp, mode, is_directory, process) VALUES(%d, '%s', %lld, %d, %d, %d)", run_id, name, gettime(), mode, is_dir, process);
-	check(sqlite3_exec(db, sql_insert_file, NULL, NULL, NULL));
+    check(sqlite3_bind_int(stmt_insert_file, 1, run_id));
+    check(sqlite3_bind_text(stmt_insert_file, 2, name, -1, SQLITE_TRANSIENT));
+    /* This assumes that we won't go over 2^32 seconds (~135 years) */
+    check(sqlite3_bind_int64(stmt_insert_file, 3, gettime()));
+    check(sqlite3_bind_int(stmt_insert_file, 4, mode));
+    check(sqlite3_bind_int(stmt_insert_file, 5, is_dir));
+    check(sqlite3_bind_int(stmt_insert_file, 6, process));
 
-    //check(sqlite3_bind_int(stmt_insert_file, 1, run_id));
-    //check(sqlite3_bind_text(stmt_insert_file, 2, name, -1, SQLITE_TRANSIENT));
-    ///* This assumes that we won't go over 2^32 seconds (~135 years) */
-    //check(sqlite3_bind_int64(stmt_insert_file, 3, gettime()));
-    //check(sqlite3_bind_int(stmt_insert_file, 4, mode));
-    //check(sqlite3_bind_int(stmt_insert_file, 5, is_dir));
-    //check(sqlite3_bind_int(stmt_insert_file, 6, process));
-
-    ////time_t step_start_time = clock();
-    //if(sqlite3_step(stmt_insert_file) != SQLITE_DONE)
-    //    goto sqlerror;
-
-    //time_t step_end_time = clock();
-    //printf("\t\t-> the step time(insert open_files) in database is : %f\n", (double)(step_end_time - step_start_time)/CLOCKS_PER_SEC);
-
-    //sqlite3_reset(stmt_insert_file);
+    if(sqlite3_step(stmt_insert_file) != SQLITE_DONE)
+        goto sqlerror;
+    sqlite3_reset(stmt_insert_file);
     return 0;
 
 sqlerror:
@@ -432,16 +358,7 @@ int db_add_exec(unsigned int process, const char *binary,
                 const char *const *argv, const char *const *envp,
                 const char *workingdir)
 {
-    //printf("I am adding exec_files!\n");
-	sqlite3_stmt *stmt_insert_exec;
-
-	const char *sql = ""
-            "INSERT INTO executed_files(run_id, name, timestamp, process, "
-            "        argv, envp, workingdir) "
-            "VALUES(?, ?, ?, ?, ?, ?, ?)";
-    check(sqlite3_prepare_v2(db, sql, -1, &stmt_insert_exec, NULL));
- 
-	check(sqlite3_bind_int(stmt_insert_exec, 1, run_id));
+    check(sqlite3_bind_int(stmt_insert_exec, 1, run_id));
     check(sqlite3_bind_text(stmt_insert_exec, 2, binary,
                             -1, SQLITE_TRANSIENT));
     /* This assumes that we won't go over 2^32 seconds (~135 years) */
@@ -464,31 +381,9 @@ int db_add_exec(unsigned int process, const char *binary,
     check(sqlite3_bind_text(stmt_insert_exec, 7, workingdir,
                             -1, SQLITE_TRANSIENT));
 
-    //time_t step_start_time = clock();
-
     if(sqlite3_step(stmt_insert_exec) != SQLITE_DONE)
         goto sqlerror;
-	sqlite3_finalize(stmt_insert_exec);
-
-    //time_t step_end_time = clock();
-    //printf("\t\t-> the step time(insert exec_files) in database is : %f\n", (double)(step_end_time - step_start_time)/CLOCKS_PER_SEC);
-
-	//
-	//char sql_insert_exec[100000];
-	//sql_insert_exec[0] = '\0';
-
-    //size_t len1;
-    //char *arglist = strarray2nulsep(argv, &len1);
-    //size_t len2;
-    //char *envlist = strarray2nulsep(envp, &len2);
-    //printf("%.*s\n", (int)len2, envlist);
-	//sprintf(sql_insert_exec, "INSERT INTO executed_files(run_id, name, timestamp, process, argv, envp, workingdir) VALUES(%d, '%s', %lld, %d, '%.*s', '%.*s', '%s')" , run_id, binary, gettime(), process, (int)len1, arglist, (int)len2, envlist, workingdir);
-    //free(arglist);
-    //free(envlist);
-	//check(sqlite3_exec(db, sql_insert_exec, NULL, NULL, NULL));
-
-    
-    //sqlite3_reset(stmt_insert_exec);
+    sqlite3_reset(stmt_insert_exec);
     return 0;
 
 sqlerror:
@@ -501,72 +396,6 @@ sqlerror:
 int db_add_connection(unsigned int process, int inbound, const char *family,
                       const char *protocol, const char *address)
 {
-	//printf("I am adding connections!\n");
-	char sql_insert_connection[1024];
-	sql_insert_connection[0] = '\0';
-
-	if(family == NULL)
-	{
-		if(protocol == NULL)
-		{
-			if(address == NULL)
-			{
-				// all null
-				sprintf(sql_insert_connection, "INSERT INTO connections(run_id, timestamp, process, inbound, family, protocol, address) VALUES(%d, %lld, %d, %d, null, null, null)" , run_id, gettime(), process, inbound?1:0);
-			}
-			else 
-			{
-				// f null, p null, a %s
-				sprintf(sql_insert_connection, "INSERT INTO connections(run_id, timestamp, process, inbound, family, protocol, address) VALUES(%d, %lld, %d, %d, null, null, '%s')'" , run_id, gettime(), process, inbound?1:0, address);
-			}
-		}
-		else
-		{
-			if(address == NULL)
-			{
-				//f null, p %s, a null
-				sprintf(sql_insert_connection, "INSERT INTO connections(run_id, timestamp, process, inbound, family, protocol, address) VALUES(%d, %lld, %d, %d, null, '%s', null)" , run_id, gettime(), process, inbound?1:0, protocol);
-			}
-			else 
-			{
-				//f null, p %s, a %s
-				sprintf(sql_insert_connection, "INSERT INTO connections(run_id, timestamp, process, inbound, family, protocol, address) VALUES(%d, %lld, %d, %d, null, '%s', '%s')" , run_id, gettime(), process, inbound?1:0, protocol, address);
-			}
-		}
-	}
-    else
-    {
-    	if(protocol == NULL)
-		{
-			if(address == NULL)
-			{
-				//f %s, p null, a null
-				sprintf(sql_insert_connection, "INSERT INTO connections(run_id, timestamp, process, inbound, family, protocol, address) VALUES(%d, %lld, %d, %d, '%s', null, null)" , run_id, gettime(), process, inbound?1:0, family);
-			}
-			else 
-			{
-				//f %s. p null, a %s
-				sprintf(sql_insert_connection, "INSERT INTO connections(run_id, timestamp, process, inbound, family, protocol, address) VALUES(%d, %lld, %d, %d, '%s', null, '%s')" , run_id, gettime(), process, inbound?1:0, family, address);
-			}
-		}
-		else
-		{
-			if(address == NULL)
-			{
-				//f %s, p %s, a null
-				sprintf(sql_insert_connection, "INSERT INTO connections(run_id, timestamp, process, inbound, family, protocol, address) VALUES(%d, %lld, %d, %d, '%s', '%s', null)" , run_id, gettime(), process, inbound?1:0, family, protocol);
-			}
-			else 
-			{
-				//f %s, p %s, a %s
-				sprintf(sql_insert_connection, "INSERT INTO connections(run_id, timestamp, process, inbound, family, protocol, address) VALUES(%d, %lld, %d, %d, '%s', '%s', '%s')" , run_id, gettime(), process, inbound?1:0, family, protocol, address);
-			}
-		}
-    }
-
-	check(sqlite3_exec(db, sql_insert_connection, NULL, NULL, NULL));
-
-/*
     check(sqlite3_bind_int(stmt_insert_connection, 1, run_id));
     check(sqlite3_bind_int64(stmt_insert_connection, 2, gettime()));
     check(sqlite3_bind_int(stmt_insert_connection, 3, process));
@@ -586,10 +415,10 @@ int db_add_connection(unsigned int process, int inbound, const char *family,
     else
         check(sqlite3_bind_text(stmt_insert_connection, 7, address,
                                 -1, SQLITE_TRANSIENT));
-*/
-    //if(sqlite3_step(stmt_insert_connection) != SQLITE_DONE)
-    //    goto sqlerror;
-    //sqlite3_reset(stmt_insert_connection);
+
+    if(sqlite3_step(stmt_insert_connection) != SQLITE_DONE)
+        goto sqlerror;
+    sqlite3_reset(stmt_insert_connection);
     return 0;
 
 sqlerror:

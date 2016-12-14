@@ -12,7 +12,10 @@
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
+#include <sys/resource.h>
 #include <unistd.h>
+#include <pthread.h>
+#include <errno.h>
 
 #include "config.h"
 #include "database.h"
@@ -147,6 +150,7 @@ static int syscall_fileopening(const char *name, struct Process *process,
 {
     unsigned int mode;
     char *pathname = abs_path_arg(process, 0);
+    //printf("pathname = [%s]\n", pathname);
 
     if(syscall == SYSCALL_OPENING_ACCESS)
         mode = FILE_STAT;
@@ -188,7 +192,7 @@ static int syscall_fileopening(const char *name, struct Process *process,
                       (int)process->retvalue.i,
                       (process->retvalue.i >= 0)?"success":"failure");
     }
-
+    //printf("process.retvalue.i = [%d]\n", process->retvalue.i);
     if(process->retvalue.i >= 0)
     {
         if(db_add_file_open(process->identifier,
@@ -435,12 +439,28 @@ static int syscall_execve_in(const char *name, struct Process *process,
     /* int execve(const char *filename,
      *            char *const argv[],
      *            char *const envp[]); */
+    //get stack size
+
+
+
     struct ExecveInfo *execi = malloc(sizeof(struct ExecveInfo));
     execi->binary = abs_path_arg(process, 0);
+    //printf("Binary is [%s]\n", execi->binary);
+    //printf("PPP1\n");
     execi->argv = tracee_strarraydup(process->mode, process->tid,
                                      process->params[1].p);
+    //printf("ARGV is [%s]\n", execi->argv[0]);
+    //printf("PPP2\n");
     execi->envp = tracee_strarraydup(process->mode, process->tid,
                                      process->params[2].p);
+    //printf("PPP3\n");
+    //char **iter = execi->envp;
+    //while (*iter) {
+    //    printf("envp: [%s]\n", *iter);
+    //    iter++;
+    //}
+   // printf("PPP3.5\n");
+
     if(verbosity >= 3)
     {
         log_debug(process->tid, "execve called:\n  binary=%s\n  argv:",
@@ -462,12 +482,15 @@ static int syscall_execve_in(const char *name, struct Process *process,
             log_debug(process->tid, "  envp: (%u entries)", (unsigned int)nb);
         }
     }
+    //printf("PPP4\n");
     process->execve_info = execi;
+    //printf("PPP5\n");
     return 0;
 }
 
 int syscall_execve_event(struct Process *process)
 {
+    //printf("process has value [%p]\n", process);
     struct Process *exec_process = process;
     struct ExecveInfo *execi = exec_process->execve_info;
     if(execi == NULL)
@@ -1097,84 +1120,162 @@ void syscall_build_table(void)
 /* ********************
  * Handle a syscall via the table
  */
+__thread int twritefd;
+__thread int treadfd;
 
-int syscall_handle(struct Process *process)
+//int syscall_handle(struct Process *process)
+void *syscall_handle(void *arg)
 {
-    pid_t tid = process->tid;
-    const int syscall = process->current_syscall & ~__X32_SYSCALL_BIT;
-    size_t syscall_type;
-    const char *inout = process->in_syscall?"out":"in";
-    if(process->mode == MODE_I386)
-    {
-        syscall_type = SYSCALL_I386;
-        if(verbosity >= 4)
-            log_debug(process->tid, "syscall %d (i386) (%s)", syscall, inout);
+    int worker_pipe[4];
+    worker_arg *argument = (worker_arg *)arg;
+    for (int i = 0; i < 4; i++) {
+        worker_pipe[i] = argument->fd[i];
+        //printf("I am worker. worker_pipe[%d] = %d\n", i, worker_pipe[i]);
     }
-    else if(process->current_syscall & __X32_SYSCALL_BIT)
+    twritefd = worker_pipe[1];
+    treadfd = worker_pipe[2];
+
+    struct rlimit rl;
+    int result;
+    result = getrlimit(RLIMIT_STACK, &rl);
+    if(result == 0)
     {
-        /* LCOV_EXCL_START : x32 is not supported right now */
-        syscall_type = SYSCALL_X86_64_x32;
-        if(verbosity >= 4)
-            log_debug(process->tid, "syscall %d (x32) (%s)", syscall, inout);
-        /* LCOV_EXCL_END */
+        //printf("\tget stack size, result = %d\n", (int)rl.rlim_cur);
     }
-    else
+    else if (result == -1)
     {
-        syscall_type = SYSCALL_X86_64;
-        if(verbosity >= 4)
-            log_debug(process->tid, "syscall %d (x64) (%s)", syscall, inout);
+        //perror("get stack size");
+    }
+    rl.rlim_cur = 16*1024*1024;
+    result = setrlimit(RLIMIT_STACK, &rl);
+    
+    struct rlimit rl2;
+    int result2;
+    result2 = getrlimit(RLIMIT_STACK, &rl2);
+    if(result2 == 0)
+    {
+        //printf("\t2get stack size, result = %d\n", (int)rl2.rlim_cur);
+    }
+    else if (result2 == -1)
+    {
+        perror("2get stack size");
     }
 
-    if(process->flags & PROCFLAG_EXECD)
-    {
-        if(verbosity >= 4)
-            log_debug(process->tid,
-                      "ignoring, EXEC'D is set -- just post-exec syscall-"
-                      "return stop");
-        process->flags &= ~PROCFLAG_EXECD;
-        if(process->execve_info != NULL)
-        {
-            free_execve_info(process->execve_info);
-            process->execve_info = NULL;
-        }
-        process->in_syscall = 1; /* set to 0 before function returns */
-    }
-    else
-    {
-        struct syscall_table_entry *entry = NULL;
-        struct syscall_table *tbl = &syscall_tables[syscall_type];
-        if(syscall < 0 || syscall >= 2000)
-            log_error(process->tid, "INVALID SYSCALL %d", syscall);
-        if(entry == NULL && syscall >= 0 && (size_t)syscall < tbl->length)
-            entry = &tbl->entries[syscall];
-        if(entry != NULL)
-        {
-            int ret = 0;
-            if(entry->name && verbosity >= 3)
-                log_debug(process->tid, "%s()", entry->name);
-            if(!process->in_syscall && entry->proc_entry)
-                ret = entry->proc_entry(entry->name, process, entry->udata);
-            else if(process->in_syscall && entry->proc_exit)
-                ret = entry->proc_exit(entry->name, process, entry->udata);
-            if(ret != 0)
-                return -1;
-        }
-    }
+    while (1) {
+        //printf("I am worker. New iteration begins.\n");
+        struct Process *process;
+        ssize_t len = read(worker_pipe[2], &process, sizeof(struct Process *));
 
-    /* Run to next syscall */
-    if(process->in_syscall)
-    {
-        process->in_syscall = 0;
-        if(process->execve_info != NULL)
+
+        //struct Process *process = (struct Process *)malloc(sizeof(struct Process));
+        //printf("I am worker. I am reading from fd [%d]\n", worker_pipe[2]);
+        //ssize_t len = read(worker_pipe[2], process, sizeof(struct Process));
+        //if (len != sizeof(struct Process)) {
+        //    printf("Worker read failed\n");
+        //    perror("read");
+        //    pthread_exit(NULL);
+        //}
+        //printf("I have finished reading [%d] bytes\n", (int)len);
+
+
+        pid_t tid = process->tid;
+        const int syscall = process->current_syscall & ~__X32_SYSCALL_BIT;
+        size_t syscall_type;
+        const char *inout = process->in_syscall?"out":"in";
+        if(process->mode == MODE_I386)
         {
-            log_error(process->tid, "out of syscall with execve_info != NULL");
-            return -1;
+            syscall_type = SYSCALL_I386;
+            if(verbosity >= 4)
+                log_debug(process->tid, "syscall %d (i386) (%s)", syscall, inout);
         }
-        process->current_syscall = -1;
+        else if(process->current_syscall & __X32_SYSCALL_BIT)
+        {
+            /* LCOV_EXCL_START : x32 is not supported right now */
+            syscall_type = SYSCALL_X86_64_x32;
+            if(verbosity >= 4)
+                log_debug(process->tid, "syscall %d (x32) (%s)", syscall, inout);
+            /* LCOV_EXCL_END */
+        }
+        else
+        {
+            syscall_type = SYSCALL_X86_64;
+            if(verbosity >= 4)
+                log_debug(process->tid, "syscall %d (x64) (%s)", syscall, inout);
+        }
+
+        if(process->flags & PROCFLAG_EXECD)
+        {
+            if(verbosity >= 4)
+                log_debug(process->tid,
+                          "ignoring, EXEC'D is set -- just post-exec syscall-"
+                          "return stop");
+            process->flags &= ~PROCFLAG_EXECD;
+            if(process->execve_info != NULL)
+            {
+                free_execve_info(process->execve_info);
+                process->execve_info = NULL;
+            }
+            process->in_syscall = 1; /* set to 0 before function returns */
+        }
+        else
+        {
+            //printf("I am worker. Handling syscall [%d]\n", syscall);
+            struct syscall_table_entry *entry = NULL;
+            struct syscall_table *tbl = &syscall_tables[syscall_type];
+            if(syscall < 0 || syscall >= 2000)
+                log_error(process->tid, "INVALID SYSCALL %d", syscall);
+            if(entry == NULL && syscall >= 0 && (size_t)syscall < tbl->length)
+                entry = &tbl->entries[syscall];
+            if(entry != NULL)
+            {
+                int ret = 0;
+                if(entry->name && verbosity >= 3)
+                    log_debug(process->tid, "%s()", entry->name);
+                if(!process->in_syscall && entry->proc_entry)
+                    ret = entry->proc_entry(entry->name, process, entry->udata);
+                else if(process->in_syscall && entry->proc_exit)
+                    ret = entry->proc_exit(entry->name, process, entry->udata);
+                if(ret != 0)
+                    //return -1;
+                    pthread_exit(NULL);
+            }
+        }
+
+        /* Run to next syscall */
+        if(process->in_syscall)
+        {
+            process->in_syscall = 0;
+            if(process->execve_info != NULL)
+            {
+                log_error(process->tid, "out of syscall with execve_info != NULL");
+                //return -1;
+                pthread_exit(NULL);
+            }
+            process->current_syscall = -1;
+        }
+        else
+            process->in_syscall = 1;
+
+
+        int request = PTRACE_SYSCALL;
+        void *addr = NULL;
+        void *data = NULL;
+
+        write(worker_pipe[1], &request, sizeof(request));
+        //printf("I am worker. I just sent request [%d]\n", request);
+        write(worker_pipe[1], &tid, sizeof(tid));
+        //printf("I am worker, I just sent tid [%d]\n", tid);
+        write(worker_pipe[1], &addr, sizeof(addr));
+        //printf("I am worker. I just sent addr [%p]\n", addr);
+        write(worker_pipe[1], &data, sizeof(data));
+        //printf("I am worker. I just sent data [%p]\n", data);
+
+        long res;
+        read(worker_pipe[2], &res, sizeof(res));
+        (void)res;
+
+        //printf("I am worker. This iteration has finished.\n");
     }
-    else
-        process->in_syscall = 1;
-    ptrace(PTRACE_SYSCALL, tid, NULL, NULL);
 
     return 0;
 }

@@ -16,7 +16,7 @@ req = [
     'usagestats>=0.3',
     'requests']
 setup(name='reprounzip',
-      version='1.1.0',
+      version='1.0.8-59-g832bfcc',
       packages=['reprounzip', 'reprounzip.unpackers',
                 'reprounzip.unpackers.common', 'reprounzip.plugins'],
       entry_points={

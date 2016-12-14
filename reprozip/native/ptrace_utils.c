@@ -14,18 +14,42 @@
 
 static long tracee_getword(pid_t tid, const void *addr)
 {
-    long res;
+
+    //printf("twritefd = [%d]\n", twritefd);
+    static int count = 0;
+    count += 1;
+    //printf("\t\tcount = [%d]\n", count);
+    //long res;
     errno = 0;
-    res = ptrace(PTRACE_PEEKDATA, tid, addr, NULL);
-    if(errno)
-    {
+    //printf("Inside tracee_getwork. TID is [%d]\n", tid);
+
+    int request = PTRACE_PEEKDATA;
+    void *data = NULL;
+
+    write(twritefd, &request, sizeof(request));
+    write(twritefd, &tid, sizeof(tid));
+    //printf("I am worker, I just sent tid [%d]\n", tid);
+    write(twritefd, &addr, sizeof(addr));
+    //printf("I am worker. I just sent addr [%p]\n", addr);
+    write(twritefd, &data, sizeof(data));
+    //printf("I am worker. I just sent data [%p]\n", data);
+
+    long res;
+    read(treadfd, &res, sizeof(res));
+
+    //printf("I am worker. I just got ptrace result [%ld]\n", res);
+
+    //res = ptrace(PTRACE_PEEKDATA, tid, addr, NULL);
+    //printf("\t after ptrace, res = %d\n", res);
+    //if(errno)
+    //{
         /* LCOV_EXCL_START : We only do that on things that went through the
          * kernel successfully, and so should be valid. The exception is
          * execve(), which will dup arguments when entering the syscall */
-        log_error(tid, "tracee_getword() failed: %s", strerror(errno));
-        return 0;
+    //    log_error(tid, "tracee_getword() failed: %s", strerror(errno));
+    //    return 0;
         /* LCOV_EXCL_END */
-    }
+    //}
     return res;
 }
 

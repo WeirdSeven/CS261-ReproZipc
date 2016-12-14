@@ -1,6 +1,12 @@
 #ifndef PTRACE_UTILS_H
 #define PTRACE_UTILS_H
 
+extern __thread int treadfd;
+extern __thread int twritefd;
+
+
+
+
 void *tracee_getptr(int mode, pid_t tid, const void *addr);
 uint64_t tracee_getlong(int mode, pid_t tid, const void *addr);
 size_t tracee_getwordsize(int mode);

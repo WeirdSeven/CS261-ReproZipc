@@ -18,7 +18,8 @@ import os
 from pkg_resources import iter_entry_points
 import platform
 from rpaths import Path
-import sqlite3
+#import sqlite3
+from pysqlite2 import dbapi2 as sqlite3
 import sys
 
 from reprozip import __version__ as reprozip_version

@@ -19,18 +19,27 @@ if platform.system().lower() != 'linux':
 
 # List the source files
 sources = ['pytracer.c', 'tracer.c', 'syscalls.c', 'database.c',
-           'ptrace_utils.c', 'utils.c', 'log.c']
+           'ptrace_utils.c', 'utils.c', 'log.c', 'vector.c']
 # They can be found under native/
 sources = [os.path.join('native', n) for n in sources]
 
 
 # Setup the libraries
-libraries = ['sqlite3', 'rt']
+#libraries = ['sqlite3', 'rt', 'pthread']
+#libraries = ['sqlite3', 'rt']
+libraries = ['db_sql', 'rt', 'dl', 'pthread']
 
+# Setup the directory of lib
+library_dirs = ['/usr/local/lib']
+
+#library_dirs_o = ['--enable-checking']
+library_dirs_o = ['-L/usr/local/lib -ldb_sql -ldl']
 
 # Build the C module
 pytracer = Extension('reprozip._pytracer',
                      sources=sources,
+                     library_dirs=library_dirs,
+                     extra_compile_args=library_dirs_o,
                      libraries=libraries)
 
 # Need to specify encoding for PY3, which has the worst unicode handling ever
@@ -42,7 +51,7 @@ req = [
     'usagestats>=0.3',
     'requests']
 setup(name='reprozip',
-      version='1.1.0',
+      version='1.0.8-59-g832bfcc',
       ext_modules=[pytracer],
       packages=['reprozip', 'reprozip.tracer'],
       entry_points={
